@@ -78,7 +78,7 @@ namespace Platformer
                 return;
             }
 
-            float targetSpeed = targetBody.velocity.x;
+            float targetSpeed = targetBody.linearVelocity.x;
             float direction = Mathf.Sign(targetSpeed);
             float targetLookAhead = Mathf.Abs(targetSpeed) > 0.1f ? lookAheadDistance * direction : 0f;
 
@@ -93,9 +93,9 @@ namespace Platformer
                 return;
             }
 
-            if (targetBody.velocity.y < fallVelocityThreshold)
+            if (targetBody.linearVelocity.y < fallVelocityThreshold)
             {
-                float t = Mathf.InverseLerp(0f, fallVelocityThreshold, targetBody.velocity.y);
+                float t = Mathf.InverseLerp(0f, fallVelocityThreshold, targetBody.linearVelocity.y);
                 float bias = Mathf.Lerp(0f, -verticalFallBias, t);
                 focusPosition.y += bias;
             }

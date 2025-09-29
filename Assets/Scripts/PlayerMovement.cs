@@ -43,7 +43,7 @@ namespace Platformer
         private bool wasGroundedLastFrame;
 
         public bool IsGrounded { get; private set; }
-        public Vector2 Velocity => body.velocity;
+        public Vector2 Velocity => body.linearVelocity;
 
         private void Awake()
         {
@@ -63,7 +63,7 @@ namespace Platformer
         private void Update()
         {
             inputX = Input.GetAxisRaw("Horizontal");
-            currentVelocity = body.velocity;
+            currentVelocity = body.linearVelocity;
 
             UpdateTimers();
             HandleJumpInput();
@@ -113,21 +113,21 @@ namespace Platformer
         private void ApplyHorizontalMovement()
         {
             float targetSpeed = inputX * maxRunSpeed;
-            float speedDifference = targetSpeed - body.velocity.x;
+            float speedDifference = targetSpeed - body.linearVelocity.x;
 
             float accelRate = Mathf.Abs(targetSpeed) > 0.01f
                 ? (IsGrounded ? acceleration : airAcceleration)
                 : (IsGrounded ? deceleration : airDeceleration);
 
             float movement = accelRate * speedDifference * Time.fixedDeltaTime;
-            float newVelocityX = body.velocity.x + movement;
+            float newVelocityX = body.linearVelocity.x + movement;
 
-            if (IsGrounded && Mathf.Abs(inputX) < 0.01f && Mathf.Abs(body.velocity.x) < 0.2f)
+            if (IsGrounded && Mathf.Abs(inputX) < 0.01f && Mathf.Abs(body.linearVelocity.x) < 0.2f)
             {
                 newVelocityX = 0f;
             }
 
-            body.velocity = new Vector2(newVelocityX, body.velocity.y);
+            body.linearVelocity = new Vector2(newVelocityX, body.linearVelocity.y);
         }
 
         private bool CanJump()
@@ -141,7 +141,7 @@ namespace Platformer
             coyoteCounter = 0f;
             isJumpCut = false;
 
-            body.velocity = new Vector2(body.velocity.x, jumpVelocity);
+            body.linearVelocity = new Vector2(body.linearVelocity.x, jumpVelocity);
         }
 
         private void ApplyGravityModifiers()
@@ -152,7 +152,7 @@ namespace Platformer
                 return;
             }
 
-            if (body.velocity.y < 0f)
+            if (body.linearVelocity.y < 0f)
             {
                 body.gravityScale = baseGravityScale * fallGravityMultiplier;
             }
