@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace Platformer
 {
-    [RequireComponent(typeof(Rigidbody2D))]
+    [RequireComponent(typeof(Rigidbody2D), typeof(CapsuleCollider2D))]
     public class PlayerMovement : MonoBehaviour
     {
         [Header("Movement")]
@@ -15,10 +15,26 @@ namespace Platformer
         [Header("Jumping")]
         [SerializeField] private float jumpHeight = 4.5f;
         [SerializeField] private float jumpTimeToApex = 0.35f;
-        [SerializeField] private float coyoteTime = 0.12f;
+        [SerializeField] private float coyoteTime = 0.055f;
         [SerializeField] private float jumpBufferTime = 0.12f;
         [SerializeField] private float fallGravityMultiplier = 1.8f;
         [SerializeField] private float shortHopGravityMultiplier = 2.2f;
+
+        [Header("Air Options")]
+        [SerializeField] private bool enableDoubleJump = true;
+        [Min(0)]
+        [SerializeField] private int maxAirJumps = 1;
+
+        [Header("Crouch Charge Jump")]
+        [SerializeField] private bool enableCrouchCharge = true;
+        [SerializeField] private float chargeTime = 0.35f;
+        [SerializeField] private float minJumpMultiplier = 1f;
+        [SerializeField] private float maxJumpMultiplier = 1.6f;
+
+        [Header("Wall Interaction")]
+        [SerializeField] private bool enableWallSlide = false;
+        [SerializeField] private float wallSlideSpeed = 3f;
+        [SerializeField] private float wallCheckDistance = 0.08f;
 
         [Header("Ground Check")]
         [SerializeField] private Transform groundCheck;
@@ -29,7 +45,10 @@ namespace Platformer
         [Tooltip("If true gravity will be scaled by fallGravityMultiplier while falling.")]
         [SerializeField] private bool useFallGravityMultiplier = true;
 
+        private const float GroundCheckDistance = 0.05f;
+
         private Rigidbody2D body;
+        private CapsuleCollider2D capsule;
         private Vector2 currentVelocity;
 
         private float baseGravityScale;
@@ -40,16 +59,27 @@ namespace Platformer
         private float coyoteCounter;
         private float jumpBufferCounter;
         private bool isJumpCut;
-        private bool wasGroundedLastFrame;
+        private bool movementSuppressed;
+        private bool isCrouching;
+        private bool isWallSliding;
+        private bool isTouchingWall;
+        private int wallDirection;
+        private float crouchChargeTimer;
+        private int airJumpsRemaining;
 
         public bool IsGrounded { get; private set; }
         public Vector2 Velocity => body.linearVelocity;
+        public bool MovementSuppressed => movementSuppressed;
+        public bool IsCrouching => isCrouching;
 
         private void Awake()
         {
             body = GetComponent<Rigidbody2D>();
+            capsule = GetComponent<CapsuleCollider2D>();
+            body.interpolation = RigidbodyInterpolation2D.Interpolate;
             baseGravityScale = body.gravityScale;
             CalculateGravity();
+            ResetAirJumpCount();
         }
 
         private void CalculateGravity()
@@ -62,16 +92,28 @@ namespace Platformer
 
         private void Update()
         {
-            inputX = Input.GetAxisRaw("Horizontal");
+            inputX = movementSuppressed ? 0f : Input.GetAxisRaw("Horizontal");
             currentVelocity = body.linearVelocity;
 
+            UpdateCrouchState();
             UpdateTimers();
-            HandleJumpInput();
+            if (!movementSuppressed)
+            {
+                HandleJumpInput();
+            }
         }
 
         private void FixedUpdate()
         {
+            RefreshContactStates();
+
+            if (movementSuppressed)
+            {
+                return;
+            }
+
             ApplyHorizontalMovement();
+            HandleWallSlide();
             ApplyGravityModifiers();
         }
 
@@ -83,25 +125,28 @@ namespace Platformer
             }
             else
             {
-                coyoteCounter -= Time.deltaTime;
+                coyoteCounter = Mathf.Max(coyoteCounter - Time.deltaTime, 0f);
             }
 
-            jumpBufferCounter -= Time.deltaTime;
+            jumpBufferCounter = Mathf.Max(jumpBufferCounter - Time.deltaTime, 0f);
         }
 
         private void HandleJumpInput()
         {
-            if (Input.GetButtonDown("Jump"))
+            bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.W);
+            bool jumpReleased = Input.GetButtonUp("Jump") || Input.GetKeyUp(KeyCode.W);
+
+            if (jumpPressed)
             {
                 jumpBufferCounter = jumpBufferTime;
             }
 
-            if (CanJump())
+            if (TryConsumeJump(out bool groundedJump, out float jumpMultiplier))
             {
-                PerformJump();
+                PerformJump(groundedJump, jumpMultiplier);
             }
 
-            if (Input.GetButtonUp("Jump"))
+            if (jumpReleased)
             {
                 if (currentVelocity.y > 0f)
                 {
@@ -112,7 +157,16 @@ namespace Platformer
 
         private void ApplyHorizontalMovement()
         {
+            if (movementSuppressed)
+            {
+                return;
+            }
+
             float targetSpeed = inputX * maxRunSpeed;
+            if (isCrouching)
+            {
+                targetSpeed = 0f;
+            }
             float speedDifference = targetSpeed - body.linearVelocity.x;
 
             float accelRate = Mathf.Abs(targetSpeed) > 0.01f
@@ -130,23 +184,75 @@ namespace Platformer
             body.linearVelocity = new Vector2(newVelocityX, body.linearVelocity.y);
         }
 
-        private bool CanJump()
+        /// <summary>
+        /// Consumes a buffered jump if we are within the coyote window or have air jumps remaining.
+        /// Returns true when a jump should be performed and outputs whether it counts as a grounded jump
+        /// plus the multiplier that should be applied to the jump velocity.
+        /// </summary>
+        private bool TryConsumeJump(out bool groundedJump, out float jumpMultiplier)
         {
-            return jumpBufferCounter > 0f && coyoteCounter > 0f;
+            groundedJump = false;
+            jumpMultiplier = 1f;
+
+            if (jumpBufferCounter <= 0f)
+            {
+                return false;
+            }
+
+            if (coyoteCounter > 0f)
+            {
+                groundedJump = true;
+                jumpMultiplier = isCrouching ? GetChargedJumpMultiplier() : 1f;
+                return true;
+            }
+
+            if (enableDoubleJump && airJumpsRemaining > 0)
+            {
+                airJumpsRemaining--;
+                return true;
+            }
+
+            return false;
         }
 
-        private void PerformJump()
+        /// <summary>
+        /// Applies the jump velocity and resets any state tied to the start of a jump.
+        /// </summary>
+        private void PerformJump(bool groundedJump, float jumpMultiplier)
         {
             jumpBufferCounter = 0f;
             coyoteCounter = 0f;
             isJumpCut = false;
 
-            body.linearVelocity = new Vector2(body.linearVelocity.x, jumpVelocity);
+            float appliedJumpVelocity = jumpVelocity * jumpMultiplier;
+            body.linearVelocity = new Vector2(body.linearVelocity.x, appliedJumpVelocity);
+
+            if (groundedJump)
+            {
+                ResetAirJumpCount();
+                if (enableCrouchCharge)
+                {
+                    crouchChargeTimer = 0f;
+                }
+            }
+
+            isCrouching = false;
         }
 
         private void ApplyGravityModifiers()
         {
+            if (movementSuppressed)
+            {
+                return;
+            }
+
             if (!useFallGravityMultiplier)
+            {
+                body.gravityScale = baseGravityScale;
+                return;
+            }
+
+            if (isWallSliding)
             {
                 body.gravityScale = baseGravityScale;
                 return;
@@ -166,23 +272,6 @@ namespace Platformer
             }
         }
 
-        private void LateUpdate()
-        {
-            CheckGroundedState();
-        }
-
-        private void CheckGroundedState()
-        {
-            Collider2D collider = Physics2D.OverlapBox(groundCheck.position, groundCheckSize, 0f, groundLayers);
-            wasGroundedLastFrame = IsGrounded;
-            IsGrounded = collider != null;
-
-            if (IsGrounded && !wasGroundedLastFrame)
-            {
-                isJumpCut = false;
-            }
-        }
-
         private void OnDrawGizmosSelected()
         {
             if (groundCheck == null)
@@ -192,6 +281,186 @@ namespace Platformer
 
             Gizmos.color = Color.green;
             Gizmos.DrawWireCube(groundCheck.position, groundCheckSize);
+        }
+
+        public void SetMovementSuppressed(bool suppressed)
+        {
+            movementSuppressed = suppressed;
+
+            if (suppressed)
+            {
+                inputX = 0f;
+                isCrouching = false;
+                crouchChargeTimer = 0f;
+            }
+            else
+            {
+                body.gravityScale = baseGravityScale;
+            }
+        }
+
+        /// <summary>
+        /// Polls the environment for ground and wall contact information so the movement state stays in sync with physics.
+        /// </summary>
+        private void RefreshContactStates()
+        {
+            UpdateGroundState();
+            UpdateWallState();
+        }
+
+        /// <summary>
+        /// Uses a downward box cast below the ground check to confirm grounded state and refresh the air jump counter.
+        /// </summary>
+        private void UpdateGroundState()
+        {
+            if (groundCheck == null)
+            {
+                return;
+            }
+
+            RaycastHit2D hit = Physics2D.BoxCast(groundCheck.position, groundCheckSize, 0f, Vector2.down, GroundCheckDistance, groundLayers);
+            IsGrounded = hit.collider != null && Vector2.Angle(hit.normal, Vector2.up) <= 60f;
+
+            if (IsGrounded)
+            {
+                isJumpCut = false;
+                ResetAirJumpCount();
+            }
+        }
+
+        /// <summary>
+        /// Checks for walls directly beside the capsule so we can decide if wall sliding should activate.
+        /// </summary>
+        private void UpdateWallState()
+        {
+            isTouchingWall = false;
+            wallDirection = 0;
+
+            if (capsule == null || IsGrounded)
+            {
+                return;
+            }
+
+            Bounds bounds = capsule.bounds;
+            Vector2 origin = bounds.center;
+            Vector2 size = new Vector2(bounds.size.x * 0.9f, bounds.size.y * 0.9f);
+
+            RaycastHit2D leftHit = Physics2D.BoxCast(origin, size, 0f, Vector2.left, wallCheckDistance, groundLayers);
+            if (leftHit.collider != null && leftHit.normal.x > 0.1f)
+            {
+                isTouchingWall = true;
+                wallDirection = -1;
+                return;
+            }
+
+            RaycastHit2D rightHit = Physics2D.BoxCast(origin, size, 0f, Vector2.right, wallCheckDistance, groundLayers);
+            if (rightHit.collider != null && rightHit.normal.x < -0.1f)
+            {
+                isTouchingWall = true;
+                wallDirection = 1;
+            }
+        }
+
+        /// <summary>
+        /// Applies a gentle downward clamp when wall sliding is enabled and the player pushes into a wall while falling.
+        /// </summary>
+        private void HandleWallSlide()
+        {
+            isWallSliding = false;
+
+            if (!enableWallSlide || IsGrounded || !isTouchingWall)
+            {
+                return;
+            }
+
+            if (Mathf.Abs(inputX) < 0.01f || Mathf.RoundToInt(Mathf.Sign(inputX)) != wallDirection)
+            {
+                return;
+            }
+
+            if (body.linearVelocity.y < 0f)
+            {
+                isWallSliding = true;
+                float clampedY = Mathf.Max(body.linearVelocity.y, -Mathf.Abs(wallSlideSpeed));
+                body.linearVelocity = new Vector2(body.linearVelocity.x, clampedY);
+            }
+        }
+
+        /// <summary>
+        /// Tracks whether the crouch input is held and builds jump charge while grounded.
+        /// </summary>
+        private void UpdateCrouchState()
+        {
+            bool crouchInputHeld = !movementSuppressed && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl) || Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow));
+            bool canCrouch = IsGrounded && crouchInputHeld;
+
+            isCrouching = canCrouch;
+
+            if (!enableCrouchCharge)
+            {
+                crouchChargeTimer = 0f;
+                return;
+            }
+
+            if (isCrouching)
+            {
+                crouchChargeTimer = Mathf.Min(crouchChargeTimer + Time.deltaTime, chargeTime);
+            }
+            else
+            {
+                crouchChargeTimer = Mathf.MoveTowards(crouchChargeTimer, 0f, Time.deltaTime * 2f);
+            }
+        }
+
+        /// <summary>
+        /// Converts the current crouch charge timer into a multiplier that scales the base jump velocity.
+        /// </summary>
+        private float GetChargedJumpMultiplier()
+        {
+            if (!enableCrouchCharge)
+            {
+                return 1f;
+            }
+
+            if (chargeTime <= Mathf.Epsilon)
+            {
+                return maxJumpMultiplier;
+            }
+
+            float t = Mathf.Clamp01(crouchChargeTimer / chargeTime);
+            return Mathf.Lerp(minJumpMultiplier, maxJumpMultiplier, t);
+        }
+
+        /// <summary>
+        /// Resets the pool of air jumps to match the inspector configuration.
+        /// </summary>
+        private void ResetAirJumpCount()
+        {
+            airJumpsRemaining = enableDoubleJump ? maxAirJumps : 0;
+        }
+
+        private void OnValidate()
+        {
+            jumpTimeToApex = Mathf.Max(0.01f, jumpTimeToApex);
+            maxAirJumps = Mathf.Max(0, maxAirJumps);
+            chargeTime = Mathf.Max(0.01f, chargeTime);
+            minJumpMultiplier = Mathf.Max(0f, minJumpMultiplier);
+            maxJumpMultiplier = Mathf.Max(minJumpMultiplier, maxJumpMultiplier);
+            wallSlideSpeed = Mathf.Max(0.1f, wallSlideSpeed);
+            wallCheckDistance = Mathf.Max(0.01f, wallCheckDistance);
+
+            if (!Application.isPlaying)
+            {
+                body = GetComponent<Rigidbody2D>();
+                capsule = GetComponent<CapsuleCollider2D>();
+            }
+
+            if (body != null)
+            {
+                CalculateGravity();
+            }
+
+            ResetAirJumpCount();
         }
     }
 }
