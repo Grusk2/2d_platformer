@@ -15,6 +15,7 @@ namespace Platformer
 
         private Vector3 currentVelocity;
         private Vector3 lookAheadOffset;
+        private Vector3 latestTargetPosition;
         private Rigidbody2D targetBody;
         private PlayerMovement playerMovement;
 
@@ -40,7 +41,9 @@ namespace Platformer
 
         private Vector3 CalculateDesiredPosition()
         {
-            Vector3 focusPosition = target.position + worldOffset;
+            Vector3 targetPosition = targetBody != null ? (Vector3)targetBody.position : target.position;
+            latestTargetPosition = targetPosition;
+            Vector3 focusPosition = targetPosition + worldOffset;
             ApplyLookAhead(ref focusPosition);
             ApplyFallBias(ref focusPosition);
 
@@ -101,7 +104,7 @@ namespace Platformer
             }
             else if (playerMovement != null && playerMovement.IsGrounded)
             {
-                focusPosition.y = Mathf.Lerp(focusPosition.y, target.position.y + worldOffset.y, Time.deltaTime * lookAheadSmoothing);
+                focusPosition.y = Mathf.Lerp(focusPosition.y, latestTargetPosition.y + worldOffset.y, Time.deltaTime * lookAheadSmoothing);
             }
         }
 
