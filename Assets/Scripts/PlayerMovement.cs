@@ -41,9 +41,11 @@ namespace Platformer
         private float jumpBufferCounter;
         private bool isJumpCut;
         private bool wasGroundedLastFrame;
+        private bool movementSuppressed;
 
         public bool IsGrounded { get; private set; }
         public Vector2 Velocity => body.linearVelocity;
+        public bool MovementSuppressed => movementSuppressed;
 
         private void Awake()
         {
@@ -62,15 +64,23 @@ namespace Platformer
 
         private void Update()
         {
-            inputX = Input.GetAxisRaw("Horizontal");
+            inputX = movementSuppressed ? 0f : Input.GetAxisRaw("Horizontal");
             currentVelocity = body.linearVelocity;
 
             UpdateTimers();
-            HandleJumpInput();
+            if (!movementSuppressed)
+            {
+                HandleJumpInput();
+            }
         }
 
         private void FixedUpdate()
         {
+            if (movementSuppressed)
+            {
+                return;
+            }
+
             ApplyHorizontalMovement();
             ApplyGravityModifiers();
         }
@@ -112,6 +122,11 @@ namespace Platformer
 
         private void ApplyHorizontalMovement()
         {
+            if (movementSuppressed)
+            {
+                return;
+            }
+
             float targetSpeed = inputX * maxRunSpeed;
             float speedDifference = targetSpeed - body.linearVelocity.x;
 
@@ -146,6 +161,11 @@ namespace Platformer
 
         private void ApplyGravityModifiers()
         {
+            if (movementSuppressed)
+            {
+                return;
+            }
+
             if (!useFallGravityMultiplier)
             {
                 body.gravityScale = baseGravityScale;
@@ -192,6 +212,20 @@ namespace Platformer
 
             Gizmos.color = Color.green;
             Gizmos.DrawWireCube(groundCheck.position, groundCheckSize);
+        }
+
+        public void SetMovementSuppressed(bool suppressed)
+        {
+            movementSuppressed = suppressed;
+
+            if (suppressed)
+            {
+                inputX = 0f;
+            }
+            else
+            {
+                body.gravityScale = baseGravityScale;
+            }
         }
     }
 }

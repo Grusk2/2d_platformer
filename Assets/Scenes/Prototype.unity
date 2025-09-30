@@ -240,6 +240,7 @@ GameObject:
   - component: {fileID: 200003}
   - component: {fileID: 200004}
   - component: {fileID: 200005}
+  - component: {fileID: 200006}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -338,8 +339,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 3c9d1e7ceea84d3e897fd9fb2f654c6d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   maxRunSpeed: 8
   acceleration: 75
   deceleration: 90
@@ -357,6 +358,36 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 1
   useFallGravityMultiplier: 1
+--- !u!114 &200006
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 200000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c4f33b6e6a8a4bd4b002d278a1a0b2d0, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  dashSpeed: 18
+  dashTime: 0.18
+  dashCooldown: 0.25
+  maxAirDashes: 1
+  coyoteTime: 0.1
+  endLagDuration: 0.05
+  groundMask:
+    serializedVersion: 2
+    m_Bits: 1
+  groundCheckSize: {x: 0.78, y: 0.1}
+  groundCheckOffset: {x: 0, y: -0.95}
+  dashTrail: {fileID: 100002, guid: 2a5fa3b4095443f2801ac0fb3a8b7906, type: 3}
+  playerSprite: {fileID: 200002}
+  afterimageSpawnInterval: 0.02
+  afterimageLifetime: 0.15
+  afterimageAlpha: 0.45
+  dashTrailBurstAmount: 16
+  cachedPlayerMovement: {fileID: 200005}
 --- !u!1 &210000
 GameObject:
   m_ObjectHideFlags: 0
