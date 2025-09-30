@@ -133,8 +133,8 @@ namespace Platformer
 
         private void HandleJumpInput()
         {
-            bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.S);
-            bool jumpReleased = Input.GetButtonUp("Jump") || Input.GetKeyUp(KeyCode.S);
+            bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.W);
+            bool jumpReleased = Input.GetButtonUp("Jump") || Input.GetKeyUp(KeyCode.W);
 
             if (jumpPressed)
             {
